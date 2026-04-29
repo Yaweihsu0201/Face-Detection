@@ -15,7 +15,7 @@ A Python/OpenCV face detection project that uses skin filtering, ellipse matchin
 
 | Original Image | Detection Result |
 |---------------|----------------|
-| ![](TestImagesForPrograms/1.jpg) | ![](FaceDetectionResults_new/1.png) |
+| ![](TestImagesForPrograms/2.jpg) | ![](FaceDetectionResults_new/2.png) |
 ## Project Structure
 
 ```text

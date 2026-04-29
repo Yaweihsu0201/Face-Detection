@@ -11,6 +11,11 @@ A Python/OpenCV face detection project that uses skin filtering, ellipse matchin
 - Batch image processing with shell scripts
 - Output visualization with detected eyes, mouth, and face ellipse
 
+## Results example
+
+| Original Image | Detection Result |
+|---------------|----------------|
+| ![](TestImagesForPrograms/1.jpg) | ![](FaceDetectionResults_new/1.png) |
 ## Project Structure
 
 ```text

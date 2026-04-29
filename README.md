@@ -1,6 +1,6 @@
 # Face Detection
 
-A Python/OpenCV face detection project that uses skin filtering, ellipse matching, eye-map detection, mouth-map detection, and geometric validation to locate faces in images.
+A Python/OpenCV face detection project that uses skin filtering, ellipse matching, eye-map detection, mouth-map detection, and geometric validation to locate faces in images. This codespace is based on ["Face Detection by Outline, Color, and Facial Features"](https://tdr.lib.ntu.edu.tw/jspui/handle/123456789/47860).
 
 ## Features
 

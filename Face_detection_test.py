@@ -1,4 +1,4 @@
-from utilities.skin_filter import skinfilter 
+from utilities.predict_skin import predict
 from utilities.ellipse_matching import ellipse_matching
 from utilities.ellipse_matching import draw_ellipse
 from utilities.eyemap import eyemap
@@ -10,44 +10,6 @@ import numpy as np
 from scipy.signal import convolve2d
 from itertools import combinations
 import sys
-
-gamma_value = 1.2
-clahe_clip = 2.0
-clahe_grid = (8, 8)
-
-def gamma_correction(img_bgr, gamma=1.2):
-    inv_gamma = 1.0 / gamma
-    table = np.array([
-        ((i / 255.0) ** inv_gamma) * 255
-        for i in np.arange(256)
-    ]).astype(np.uint8)
-    return cv2.LUT(img_bgr, table)
-
-
-def apply_clahe_on_y(img_bgr, clip_limit=2.0, tile_grid_size=(8, 8)):
-    # OpenCV 的 YCrCb 順序是 [Y, Cr, Cb]
-    img_ycrcb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2YCrCb)
-    Y = img_ycrcb[:, :, 0]
-    Cr = img_ycrcb[:, :, 1]
-    Cb = img_ycrcb[:, :, 2]
-
-    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
-    Y_eq = clahe.apply(Y)
-
-    out_ycrcb = np.stack([Y_eq, Cr, Cb], axis=-1)
-    out_bgr = cv2.cvtColor(out_ycrcb, cv2.COLOR_YCrCb2BGR)
-    return out_bgr
-
-
-def preprocess_image(img_bgr):
-    img_bgr = gamma_correction(img_bgr, gamma=gamma_value)
-    img_bgr = apply_clahe_on_y(
-        img_bgr,
-        clip_limit=clahe_clip,
-        tile_grid_size=clahe_grid
-    )
-    return img_bgr
-
 
 def create_circular_kernel(h):
     r = int(h / 40)
@@ -262,12 +224,10 @@ image_path = sys.argv[1]
 output_path = sys.argv[2]
 
 img = cv2.imread(image_path)
-img_E = preprocess_image(img)
 threshold_e, threshold_m = 2, 1e10
 m, n, _ = img.shape
 img_rgb = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-img_rgb_E = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-skin = skinfilter(img_rgb_E)
+skin = predict(image_path, "checkpoints/unet_skin_best.pth")
 ellipse, all_points = ellipse_matching(skin)
 Eyemap = eyemap(img_rgb)
 Mouthmap = mouthmap(img_rgb,all_points)
@@ -314,7 +274,7 @@ for e in ellipse:
                 "x1": x1,
                 "x2": x2
             })
-            print(val)
+            #print(val)
     for i in range(1,m-1):
         for j in range(1,n-1):
             val = mouthmap_conv[i][j]
@@ -348,6 +308,7 @@ for e in ellipse:
         continue
     valid = test_triplets_with_geometry(eye_candidates,mouth_candidates,eigvecs, mean)
     if len(valid) > 0:
+        
         best = valid[0]
 
         img_result = draw_result(img_rgb, best, e)

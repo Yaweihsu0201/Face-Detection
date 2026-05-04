@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.pyc
+.venv
+
+# Environment files
+.env
+
+# Output folders
+results/
+outputs/
+archive/
+TestImagesForPrograms/
+
+# Local-only files
+local_test/
+secret_key.txt
+config.json

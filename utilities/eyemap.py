@@ -59,7 +59,7 @@ def eyemap(img_rgb, k=3, l=10):
     return eyemap_result
 
 if __name__ ==  "__main__":
-    image = cv2.imread("TestImagesForPrograms/mit3.jpg")
+    image = cv2.imread("TestImagesForPrograms/19.jpg")
     img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     eye_map = eyemap(img_rgb)
 
@@ -79,5 +79,5 @@ if __name__ ==  "__main__":
     plt.colorbar(im, fraction=0.046, pad=0.04)
     plt.title("Top-10 Eyemap Responses", y=-0.15)
 
-    plt.show()
+    plt.savefig("eyemap_result.png", dpi=200, bbox_inches='tight')
     

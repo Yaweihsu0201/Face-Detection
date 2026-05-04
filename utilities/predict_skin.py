@@ -1,7 +1,9 @@
 import cv2
 import torch
 import numpy as np
-
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from models.unet import UNet
 
 
@@ -37,8 +39,8 @@ def predict(image_path, weight_path):
 
 
 if __name__ == "__main__":
-    predict(
-        image_path="01.jpg",
+    output = predict(
+        image_path="TestImagesForPrograms/19.jpg",
         weight_path="checkpoints/unet_skin_best.pth",
-        output_path="01.png"
     )
+    cv2.imwrite("19.png",output)

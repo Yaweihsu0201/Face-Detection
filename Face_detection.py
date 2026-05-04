@@ -1,4 +1,4 @@
-from utilities.skin_filter import skinfilter 
+from utilities.predict_skin import predict
 from utilities.ellipse_matching import ellipse_matching
 from utilities.ellipse_matching import draw_ellipse
 from utilities.eyemap import eyemap
@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 from scipy.signal import convolve2d
 from itertools import combinations
+import sys
 
 def create_circular_kernel(h):
     r = int(h / 40)
@@ -98,13 +99,26 @@ def check_length_ratio(A, B, C):
 
     return ok, ratio
 
-def test_triplets_with_geometry(eye_candidates, mouth_candidates, eigvecs):
+def test_triplets_with_geometry(
+    eye_candidates,
+    mouth_candidates,
+    eigvecs,
+    center,
+    a,
+    b
+):
     valid_triplets = []
+
+    ellipse_center = np.array(center, dtype=float)
+
+    major_axis = eigvecs[:, 0].astype(float)
+    major_axis = major_axis / (np.linalg.norm(major_axis) + 1e-8)
 
     for e1, e2 in combinations(eye_candidates, 2):
         A = np.array([e1["x"], e1["y"]], dtype=float)
         B = np.array([e2["x"], e2["y"]], dtype=float)
 
+        # 讓 A 永遠是左眼，B 永遠是右眼
         if A[0] > B[0]:
             A, B = B, A
             e1, e2 = e2, e1
@@ -116,36 +130,59 @@ def test_triplets_with_geometry(eye_candidates, mouth_candidates, eigvecs):
         if len_AB == 0:
             continue
 
+        # 雙眼距離限制：避免兩點太近或太遠
+        if not (0.20 * b <= len_AB <= 1.80 * b):
+            continue
+
+        # 雙眼 midpoint 要接近臉的長軸
+        center_to_D = D - ellipse_center
+        proj_len = np.dot(center_to_D, major_axis)
+        proj_point = ellipse_center + proj_len * major_axis
+        dist_to_axis = np.linalg.norm(D - proj_point)
+
+        if dist_to_axis > 0.35 * b:
+            continue
+
         for m in mouth_candidates:
             C = np.array([m["x"], m["y"]], dtype=float)
-            if A[1] >= C[1] or B[1] >= C[1]:
-                continue
+
             CD = D - C
             len_CD = np.linalg.norm(CD)
 
             if len_CD == 0:
                 continue
 
-            cos_ab_cd = np.dot(AB, CD) / (len_AB * len_CD)
-            cos_ab_cd = np.clip(cos_ab_cd, -1.0, 1.0)
-            angle_ab_cd = np.degrees(np.arccos(cos_ab_cd))
-
-            if abs(angle_ab_cd - 90) > 20:
-                continue
-
-            major_axis = eigvecs[:, 0].astype(float)
+            # 嘴巴到眼睛中點的方向應該接近臉長軸
             cos_cd_e1 = np.dot(CD, major_axis) / (
-                len_CD * np.linalg.norm(major_axis)
+                len_CD * np.linalg.norm(major_axis) + 1e-8
             )
             cos_cd_e1 = np.clip(cos_cd_e1, -1.0, 1.0)
             angle_cd_e1 = np.degrees(np.arccos(abs(cos_cd_e1)))
 
-            if angle_cd_e1 > 30:
+            if angle_cd_e1 > 35:
+                continue
+
+            # 雙眼連線 AB 應該接近垂直於 CD
+            cos_ab_cd = np.dot(AB, CD) / (len_AB * len_CD + 1e-8)
+            cos_ab_cd = np.clip(cos_ab_cd, -1.0, 1.0)
+            angle_ab_cd = np.degrees(np.arccos(abs(cos_ab_cd)))
+
+            # 因為用了 abs(cos)，垂直時 angle 接近 90
+            if abs(angle_ab_cd - 90) > 25:
                 continue
 
             ratio = len_AB / len_CD
-            if not (0.4 <= ratio <= 1.0):
+
+            if not (0.3 <= ratio <= 1.5):
                 continue
+
+            score = (
+                e1["value"] + e2["value"] + m["value"]
+                - 0.5 * abs(angle_ab_cd - 90)
+                - 0.5 * angle_cd_e1
+                - 5.0 * abs(ratio - 0.7)
+                - 0.2 * dist_to_axis
+            )
 
             valid_triplets.append({
                 "left_eye": e1,
@@ -153,8 +190,16 @@ def test_triplets_with_geometry(eye_candidates, mouth_candidates, eigvecs):
                 "mouth": m,
                 "angle_ab_cd": angle_ab_cd,
                 "angle_cd_e1": angle_cd_e1,
-                "ratio": ratio
+                "ratio": ratio,
+                "dist_to_axis": dist_to_axis,
+                "score": score
             })
+
+    valid_triplets = sorted(
+        valid_triplets,
+        key=lambda x: x["score"],
+        reverse=True
+    )
 
     return valid_triplets
 
@@ -208,116 +253,100 @@ def draw_result(img_rgb, result, ellipse_info):
 
     return img_draw
 
+image_path = sys.argv[1]
+output_path = sys.argv[2]
 
-if __name__ == "__main__":
-    img = cv2.imread("TestImagesForPrograms/28.jpg")
-    threshold_e, threshold_m = 2, 1e10
-    m, n, _ = img.shape
-    img_rgb = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-    skin = skinfilter(img_rgb)
-    ellipse, all_points = ellipse_matching(skin)
-    Eyemap = eyemap(img_rgb)
-    Mouthmap = mouthmap(img_rgb,all_points)
-    #eye_candidates = []
-    #mouth_candidates = []
-    for e in ellipse:
-        eye_candidates = []
-        mouth_candidates = []
-        a,b = e["a"],e["b"]
-        h = max(a,b)
-        w = min(a,b)
-        mean = e["center"]
-        eigvecs = e["eigvecs"]
-        kernel_c = create_circular_kernel(h)
-        kernel_e = create_ellipse_kernel(h,w)
-        eyemap_conv = convolve2d(Eyemap, kernel_c, mode='same')
-        mouthmap_conv = convolve2d(Mouthmap, kernel_e, mode='same')
-        for i in range(1,m-1):
-            for j in range(1,n-1):
-                val = eyemap_conv[i][j]
+img = cv2.imread(image_path)
+threshold_e, threshold_m = 1.5, 1e10
+m, n, _ = img.shape
+img_rgb = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
+skin = predict(image_path, "checkpoints/unet_skin_best.pth")
+ellipse, all_points = ellipse_matching(skin)
+Eyemap = eyemap(img_rgb)
+Mouthmap = mouthmap(img_rgb,all_points)
+#eye_candidates = []
+#mouth_candidates = []
+print(len(ellipse))
+for e in ellipse:
+    eye_candidates = []
+    mouth_candidates = []
+    a,b = e["a"],e["b"]
+    h = max(a,b)
+    w = min(a,b)
+    mean = e["center"]
+    eigvecs = e["eigvecs"]
+    kernel_c = create_circular_kernel(h)
+    kernel_e = create_ellipse_kernel(h,w)
+    eyemap_conv = convolve2d(Eyemap, kernel_c, mode='same')
+    mouthmap_conv = convolve2d(Mouthmap, kernel_e, mode='same')
 
-                if val <= threshold_e:
-                    continue
+    for i in range(1,m-1):
+        for j in range(1,n-1):
+            val = eyemap_conv[i][j]
 
-                patch = eyemap_conv[i-1:i+2, j-1:j+2]
-                if val < np.max(patch):
-                    continue
+            if val <= threshold_e:
+                continue
 
-                p = np.array([j, i], dtype=np.float32)
-                z = p - mean
-                xe = z @ eigvecs   # [x1, x2]
+            patch = eyemap_conv[i-1:i+2, j-1:j+2]
+            if val < np.max(patch):
+                continue
 
-                x1, x2 = xe[0], xe[1]
+            p = np.array([j, i], dtype=np.float32)
+            z = p - mean
+            xe = z @ eigvecs   # [x1, x2]
 
-                if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
-                    continue
+            x1, x2 = xe[0], xe[1]
 
-                eye_candidates.append({
-                    "m": i,
-                    "n": j,
-                    "x": j,
-                    "y": i,
-                    "value": val,
-                    "x1": x1,
-                    "x2": x2
-                })
-        for i in range(1,m-1):
-            for j in range(1,n-1):
-                val = mouthmap_conv[i][j]
+            if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
+                continue
 
-                if val <= threshold_m:
-                    continue
+            eye_candidates.append({
+                "m": i,
+                "n": j,
+                "x": j,
+                "y": i,
+                "value": val,
+                "x1": x1,
+                "x2": x2
+            })
+            
+    for i in range(1,m-1):
+        for j in range(1,n-1):
+            val = mouthmap_conv[i][j]
 
-                patch = mouthmap_conv[i-1:i+2, j-1:j+2]
-                if val < np.max(patch):
-                    continue
+            if val <= threshold_m:
+                continue
 
-                p = np.array([j, i], dtype=np.float32)
-                z = p - mean
-                xe = z @ eigvecs   # [x1, x2]
+            patch = mouthmap_conv[i-1:i+2, j-1:j+2]
+            if val < np.max(patch):
+                continue
 
-                x1, x2 = xe[0], xe[1]
+            p = np.array([j, i], dtype=np.float32)
+            z = p - mean
+            xe = z @ eigvecs   # [x1, x2]
 
-                if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
-                    continue
+            x1, x2 = xe[0], xe[1]
 
-                mouth_candidates.append({
-                    "m": i,
-                    "n": j,
-                    "x": j,
-                    "y": i,
-                    "value": val,
-                    "x1": x1,
-                    "x2": x2
-                })
-        if len(eye_candidates)<2 or len(mouth_candidates)<1:
-            continue
-        valid = test_triplets_with_geometry(eye_candidates,mouth_candidates,eigvecs)
-        debug_img = img_rgb.copy()
+            if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
+                continue
 
-        # 畫 eye candidates（綠色）
-        for e_cand in eye_candidates:
-            x = int(e_cand["x"])
-            y = int(e_cand["y"])
-            cv2.circle(debug_img, (x, y), 2, (0, 255, 0), -1)
+            mouth_candidates.append({
+                "m": i,
+                "n": j,
+                "x": j,
+                "y": i,
+                "value": val,
+                "x1": x1,
+                "x2": x2
+            }) 
+    if len(eye_candidates)<2 or len(mouth_candidates)<1:
+        continue
+    valid = test_triplets_with_geometry(eye_candidates,mouth_candidates,eigvecs, mean, a, b)
 
-        # 畫 mouth candidates（紅色）
-        for m_cand in mouth_candidates:
-            x = int(m_cand["x"])
-            y = int(m_cand["y"])
-            cv2.circle(debug_img, (x, y), 2, (255, 0, 0), -1)
+    if len(valid) > 0:
+        
+        best = valid[0]
 
-        plt.figure(figsize=(8, 8))
-        plt.title(f"Eyes: {len(eye_candidates)} | Mouth: {len(mouth_candidates)}")
-        plt.imshow(debug_img)
-        plt.axis('off')
-        plt.show()
-        # if len(valid) > 0:
-        #     best = valid[0]
-        #     print(len(valid))
-        #     img_result = draw_result(img_rgb, best, e)
-
-        #     plt.figure(figsize=(8, 8))
-        #     plt.imshow(img_result)
-        #     plt.axis('off')
-        #     plt.show()
+        img_result = draw_result(img_rgb, best, e)
+        output = cv2.cvtColor(img_result, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(output_path, output)

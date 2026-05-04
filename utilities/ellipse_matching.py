@@ -19,7 +19,7 @@ def draw_ellipse(img, mean, a, b, eigvecs, color=(0,255,0), thickness=2):
 
 def ellipse_matching(img_binary):
     num_labels, labels = cv2.connectedComponents(img_binary)
-    print("Objects found:", num_labels - 1) 
+    #print("Objects found:", num_labels - 1) 
 
     results = []
     all_points = []

@@ -10,7 +10,7 @@ do
 
     out="FaceDetectionResults/${filename}.png"
 
-    python Face_detection_test.py "$img" "$out"
+    python Face_detection.py "$img" "$out"
 
     echo "Finished processing $img"
 done

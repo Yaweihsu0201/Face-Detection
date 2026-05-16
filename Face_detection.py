@@ -264,6 +264,22 @@ skin = predict(image_path, "checkpoints/unet_skin_best.pth")
 ellipse, all_points = ellipse_matching(skin)
 Eyemap = eyemap(img_rgb)
 Mouthmap = mouthmap(img_rgb,all_points)
+flat = Mouthmap.flatten()
+top_idx = np.argpartition(flat, -10)[-10:]   # 比 sort 快
+ys, xs = np.unravel_index(top_idx, Mouthmap.shape)
+
+# -------- 畫圖 --------
+plt.figure(figsize=(6, 6))
+im = plt.imshow(Mouthmap, cmap='jet')
+plt.axis('off')
+
+# 標記點（紅色）
+plt.scatter(xs, ys, c='red', s=40, marker='o', edgecolors='black')
+
+plt.colorbar(im, fraction=0.046, pad=0.04)
+plt.title("Top-10 Mouthmap Responses", y=-0.15)
+
+plt.savefig("mouthmap_result.png", dpi=200, bbox_inches='tight')
 #eye_candidates = []
 #mouth_candidates = []
 print(len(ellipse))

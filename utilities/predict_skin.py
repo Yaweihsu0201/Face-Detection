@@ -3,11 +3,21 @@ import torch
 import numpy as np
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from models.unet import UNet
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 def predict(image_path, weight_path):
+    """
+    Compute the skin mask based on chrominance components.
+
+    Args:
+        image_path: Path to the input image.
+        weight_path: Path to the pre-trained model weights.
+
+    Returns:
+        mask: Binary image highlighting possible skin regions.
+    """
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model = UNet().to(device)
@@ -32,8 +42,6 @@ def predict(image_path, weight_path):
     mask = mask.squeeze().cpu().numpy()
     mask = cv2.resize(mask, (w, h))
     mask = (mask * 255).astype(np.uint8)
-
-    """result = cv2.bitwise_and(img, img, mask=mask)"""
     
     return mask
 

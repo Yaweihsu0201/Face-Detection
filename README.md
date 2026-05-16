@@ -1,6 +1,24 @@
-# Face Detection
+# Face Detection Based on Paper Reimplementation and Improvement
 
-A Python/OpenCV face detection project that uses skin filtering, ellipse matching, eye-map detection, mouth-map detection, and geometric validation to locate faces in images. This codespace is based on ["Face Detection by Outline, Color, and Facial Features"](https://tdr.lib.ntu.edu.tw/jspui/handle/123456789/47860).
+## Overview
+
+This project implements a face detection pipeline inspired by the method proposed in:
+
+> Ke-Jie Liao 廖科傑, "運用輪廓色彩和五官的人臉偵測技術 Face Detection by Outline, Color, and Facial Features", 2010.
+
+The goal of this project is to reproduce the core idea of the original paper and further improve its performance under practical conditions such as illumination variation, complex backgrounds, and inaccurate candidate regions.
+
+Compared with the original method, this implementation includes several modifications, including:
+
+- replaced color-based skin filtering with Deep Learning method
+- geometric validation for eye and mouth candidates
+
+## Motivation
+
+Face detection methods based on handcrafted features are sensitive to lighting conditions, skin color distribution, and background noise. Although the original paper provides a structured detection pipeline, some failure cases still occur in real images.
+
+Therefore, this project aims to improve the robustness of the original method by integrating UNet for skin filtering and giving better geometric validation for eye and mouth candidates
+.
 
 ## Features
 
@@ -15,7 +33,7 @@ A Python/OpenCV face detection project that uses skin filtering, ellipse matchin
 
 | Original Image | Detection Result |
 |---------------|----------------|
-| ![](TestImagesForPrograms/2.jpg) | ![](FaceDetectionResults_new/2.png) |
+| ![](docs/19.jpg) | ![](docs/19.png) |
 ## Project Structure
 
 ```text

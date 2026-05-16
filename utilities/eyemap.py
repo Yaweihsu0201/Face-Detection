@@ -1,9 +1,18 @@
 import cv2
-from matplotlib import pyplot as plt
 from scipy.signal import convolve2d
 import numpy as np
 
 def edge_filter(sigma=1, l=10):
+    """
+    Compute the edge filter for eye map generation.
+
+    Args:
+        sigma: Standard deviation for the Gaussian filter.
+        l: Half-length of the filter.
+
+    Returns:
+        Filter coefficients.
+    """
     filter = np.zeros(2*l+1)
     for i in range(10):
         filter[i]=np.exp(sigma*(i-10))
@@ -13,6 +22,15 @@ def edge_filter(sigma=1, l=10):
     return filter
 
 def eyemap(img_rgb, k=3, l=10):
+    """
+    Compute the eye map based on chrominance components.
+
+    Args:
+        ycbcr_image: Input image in YCbCr color space.
+
+    Returns:
+        Eye map highlighting possible eye regions.
+    """
     img_ycrcb = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2YCrCb)
     Y = img_ycrcb[:, :, 0]
     kernel = np.array([

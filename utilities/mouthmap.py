@@ -23,5 +23,3 @@ def mouthmap(img_rgb, all_points):
     MouthMap = tl(A, B)
 
     return MouthMap
-
-    

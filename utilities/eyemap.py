@@ -57,27 +57,3 @@ def eyemap(img_rgb, k=3, l=10):
     eyemap_result = 0.45*eyemapl + 0.45*eyemapc + 0.1*eyemapt
 
     return eyemap_result
-
-if __name__ ==  "__main__":
-    image = cv2.imread("TestImagesForPrograms/19.jpg")
-    img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    eye_map = eyemap(img_rgb)
-
-    # -------- 找 top 10 --------
-    flat = eye_map.flatten()
-    top_idx = np.argpartition(flat, -10)[-10:]   # 比 sort 快
-    ys, xs = np.unravel_index(top_idx, eye_map.shape)
-
-    # -------- 畫圖 --------
-    plt.figure(figsize=(6, 6))
-    im = plt.imshow(eye_map, cmap='jet')
-    plt.axis('off')
-
-    # 標記點（紅色）
-    plt.scatter(xs, ys, c='red', s=40, marker='o', edgecolors='black')
-
-    plt.colorbar(im, fraction=0.046, pad=0.04)
-    plt.title("Top-10 Eyemap Responses", y=-0.15)
-
-    plt.savefig("eyemap_result.png", dpi=200, bbox_inches='tight')
-    

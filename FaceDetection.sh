@@ -2,15 +2,13 @@
 
 echo "script started"
 mkdir -p FaceDetectionResults
-echo "mkdir done"
-
 for img in TestImagesForPrograms/*.jpg
 do
     filename=$(basename "$img" .jpg)
 
     out="FaceDetectionResults/${filename}.png"
 
-    python Face_detection.py "$img" "$out"
+    python FaceDetection.py "$img" "$out"
 
     echo "Finished processing $img"
 done

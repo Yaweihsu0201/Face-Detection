@@ -10,7 +10,12 @@ __pycache__/
 results/
 outputs/
 archive/
-TestImagesForPrograms/
+FaceDetectionResults/
+label_preview/
+dataset/
+triplet_labeling/
+valid_triplets_plot/
+triplet_dataset/
 
 # Local-only files
 local_test/

@@ -9,6 +9,200 @@ import numpy as np
 from scipy.signal import convolve2d
 from itertools import combinations
 import sys
+import csv
+def save_triplet_features_to_csv(
+    csv_path,
+    image_name,
+    valid_triplets,
+    ellipse_info
+):
+    fieldnames = ["image", "triplet_id", "left_eye_x", "left_eye_y", "right_eye_x", "right_eye_y", "mouth_x", "mouth_y"] + FEATURE_NAMES + ["label"]
+
+    file_exists = False
+    try:
+        with open(csv_path, "r", newline="") as f:
+            file_exists = True
+    except FileNotFoundError:
+        file_exists = False
+
+    with open(csv_path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+
+        if not file_exists:
+            writer.writeheader()
+
+        for idx, triplet in enumerate(valid_triplets):
+            e1 = triplet["left_eye"]
+            e2 = triplet["right_eye"]
+            m = triplet["mouth"]
+
+            features = extract_triplet_features(e1, e2, m, ellipse_info)
+
+            row = {
+                "image": image_name,
+                "triplet_id": idx,
+                "left_eye_x": e1["x"],
+                "left_eye_y": e1["y"],
+                "right_eye_x": e2["x"],
+                "right_eye_y": e2["y"],
+                "mouth_x": m["x"],
+                "mouth_y": m["y"],
+                "label": -1
+            }
+
+            for name, value in zip(FEATURE_NAMES, features):
+                row[name] = value
+
+            writer.writerow(row)
+
+def extract_triplet_features(e1, e2, m, ellipse_info):
+    center = ellipse_info["center"]
+    a = ellipse_info["a"]
+    b = ellipse_info["b"]
+    eigvecs = ellipse_info["eigvecs"]
+
+    major_axis = eigvecs[:, 0]
+    minor_axis = eigvecs[:, 1]
+
+    # Ellipse size (for normalization)
+    ellipse_size = np.sqrt(a**2 + b**2)
+
+    # Convert absolute coordinates to relative (centered at ellipse center)
+    e1_pos = np.array([e1["x"] - center[0], e1["y"] - center[1]], dtype=float)
+    e2_pos = np.array([e2["x"] - center[0], e2["y"] - center[1]], dtype=float)
+    m_pos = np.array([m["x"] - center[0], m["y"] - center[1]], dtype=float)
+
+    # Relative distances (normalized by ellipse size)
+    e1_e2_dist = np.linalg.norm(e2_pos - e1_pos) / (ellipse_size + 1e-8)
+    e1_m_dist = np.linalg.norm(m_pos - e1_pos) / (ellipse_size + 1e-8)
+    e2_m_dist = np.linalg.norm(m_pos - e2_pos) / (ellipse_size + 1e-8)
+
+    # Eyes midpoint
+    eyes_midpoint = (e1_pos + e2_pos) / 2
+    midpoint_m_dist = np.linalg.norm(m_pos - eyes_midpoint) / (ellipse_size + 1e-8)
+
+    # Eyes to mouth vector
+    eyes_mouth_vec = m_pos - eyes_midpoint
+    eyes_eyes_vec = e2_pos - e1_pos
+
+    # Angles between vectors (relative geometry)
+    if np.linalg.norm(eyes_eyes_vec) > 1e-8 and np.linalg.norm(eyes_mouth_vec) > 1e-8:
+        cos_angle = np.dot(eyes_eyes_vec, eyes_mouth_vec) / (
+            np.linalg.norm(eyes_eyes_vec) * np.linalg.norm(eyes_mouth_vec) + 1e-8
+        )
+        cos_angle = np.clip(cos_angle, -1.0, 1.0)
+        angle_eyes_mouth = np.degrees(np.arccos(abs(cos_angle)))
+    else:
+        angle_eyes_mouth = 0.0
+
+    # Angle between eyes-mouth vector and major axis
+    if np.linalg.norm(eyes_mouth_vec) > 1e-8:
+        cos_angle_major = np.dot(eyes_mouth_vec, major_axis) / (
+            np.linalg.norm(eyes_mouth_vec) + 1e-8
+        )
+        cos_angle_major = np.clip(cos_angle_major, -1.0, 1.0)
+        angle_to_major_axis = np.degrees(np.arccos(abs(cos_angle_major)))
+    else:
+        angle_to_major_axis = 0.0
+
+    # Relative positions in ellipse coordinates
+    e1_x1, e1_x2 = e1["x1"], e1["x2"]
+    e2_x1, e2_x2 = e2["x1"], e2["x2"]
+    m_x1, m_x2 = m["x1"], m["x2"]
+
+    # Normalize by ellipse axes
+    e1_x1_norm = e1_x1 / (a + 1e-8)
+    e1_x2_norm = e1_x2 / (b + 1e-8)
+    e2_x1_norm = e2_x1 / (a + 1e-8)
+    e2_x2_norm = e2_x2 / (b + 1e-8)
+    m_x1_norm = m_x1 / (a + 1e-8)
+    m_x2_norm = m_x2 / (b + 1e-8)
+
+    # Distance from ellipse center (normalized)
+    e1_center_dist = np.sqrt(e1_x1**2 + e1_x2**2) / (ellipse_size + 1e-8)
+    e2_center_dist = np.sqrt(e2_x1**2 + e2_x2**2) / (ellipse_size + 1e-8)
+    m_center_dist = np.sqrt(m_x1**2 + m_x2**2) / (ellipse_size + 1e-8)
+
+    features = [
+        # Relative distances (normalized by ellipse size)
+        e1_e2_dist,
+        e1_m_dist,
+        e2_m_dist,
+        midpoint_m_dist,
+
+        # Ellipse-normalized coordinates (relative to ellipse)
+        e1_x1_norm,
+        e1_x2_norm,
+        e2_x1_norm,
+        e2_x2_norm,
+        m_x1_norm,
+        m_x2_norm,
+
+        # Distance from center (normalized)
+        e1_center_dist,
+        e2_center_dist,
+        m_center_dist,
+
+        # Angles (relative geometry)
+        angle_eyes_mouth,
+        angle_to_major_axis,
+
+        # Ellipse shape (relative)
+        a / (b + 1e-8),
+
+        # Ellipse orientation
+        major_axis[0],
+        major_axis[1],
+        minor_axis[0],
+        minor_axis[1],
+
+        # Map response values
+        e1["value"],
+        e2["value"],
+        m["value"],
+    ]
+
+    return features
+
+FEATURE_NAMES = [
+    # Relative distances (normalized by ellipse size)
+    "e1_e2_dist_norm",
+    "e1_m_dist_norm",
+    "e2_m_dist_norm",
+    "midpoint_m_dist_norm",
+
+    # Ellipse-normalized coordinates (relative to ellipse)
+    "left_eye_x1_norm",
+    "left_eye_x2_norm",
+    "right_eye_x1_norm",
+    "right_eye_x2_norm",
+    "mouth_x1_norm",
+    "mouth_x2_norm",
+
+    # Distance from ellipse center (normalized)
+    "left_eye_center_dist_norm",
+    "right_eye_center_dist_norm",
+    "mouth_center_dist_norm",
+
+    # Angles (relative geometry)
+    "angle_eyes_mouth",
+    "angle_to_major_axis",
+
+    # Ellipse shape (relative)
+    "ellipse_ab_ratio",
+
+    # Ellipse orientation
+    "major_axis_x",
+    "major_axis_y",
+    "minor_axis_x",
+    "minor_axis_y",
+
+    # Map response values
+    "left_eye_value",
+    "right_eye_value",
+    "mouth_value",
+]
+
 
 def create_circular_kernel(h):
     r = int(h / 40)
@@ -33,71 +227,6 @@ def create_ellipse_kernel(h, w):
     kernel = ((y / a)**2 + (x / b)**2 <= 1).astype(np.float32)
 
     return kernel
-
-def angle_eye_mouth(A, B, C):
-    A = np.array(A, dtype=float)
-    B = np.array(B, dtype=float)
-    C = np.array(C, dtype=float)
-
-    D = (A + B) / 2
-
-    AB = B - A
-    CD = D - C
-
-    norm_AB = np.linalg.norm(AB)
-    norm_CD = np.linalg.norm(CD)
-
-    if norm_AB == 0 or norm_CD == 0:
-        return None
-
-    cos_theta = np.dot(AB, CD) / (norm_AB * norm_CD)
-    cos_theta = np.clip(cos_theta, -1.0, 1.0)
-
-    theta = np.degrees(np.arccos(cos_theta))
-    return theta
-
-def check_cd_parallel_e1(A, B, C, eigvecs, angle_thresh_deg=30):
-    A = np.array(A, dtype=float)
-    B = np.array(B, dtype=float)
-    C = np.array(C, dtype=float)
-
-    D = (A + B) / 2
-    CD = D - C
-    e1 = eigvecs[:, 0].astype(float)
-
-    norm_CD = np.linalg.norm(CD)
-    norm_e1 = np.linalg.norm(e1)
-
-    if norm_CD == 0 or norm_e1 == 0:
-        return False, None
-
-    cos_theta = np.dot(CD, e1) / (norm_CD * norm_e1)
-    cos_theta = np.clip(cos_theta, -1.0, 1.0)
-
-    theta_deg = np.degrees(np.arccos(abs(cos_theta)))
-
-    return theta_deg <= angle_thresh_deg, theta_deg
-
-def check_length_ratio(A, B, C):
-    A = np.array(A, dtype=float)
-    B = np.array(B, dtype=float)
-    C = np.array(C, dtype=float)
-
-    D = (A + B) / 2
-
-    AB = B - A
-    CD = D - C
-
-    len_AB = np.linalg.norm(AB)
-    len_CD = np.linalg.norm(CD)
-
-    if len_CD == 0:
-        return False, None
-
-    ratio = len_AB / len_CD
-    ok = 0.4 <= ratio <= 2.5
-
-    return ok, ratio
 
 def test_triplets_with_geometry(
     eye_candidates,
@@ -203,59 +332,7 @@ def test_triplets_with_geometry(
 
     return valid_triplets
 
-def draw_result(img_rgb, result, ellipse_info):
-    img_draw = img_rgb.copy()
-
-    left_eye = result["left_eye"]
-    right_eye = result["right_eye"]
-    mouth = result["mouth"]
-
-    center = ellipse_info["center"]
-    a = ellipse_info["a"]
-    b = ellipse_info["b"]
-    eigvecs = ellipse_info["eigvecs"]
-
-    cv2.circle(img_draw, (int(left_eye["x"]), int(left_eye["y"])), 5, (255, 0, 0), -1)
-    cv2.circle(img_draw, (int(right_eye["x"]), int(right_eye["y"])), 5, (0, 255, 0), -1)
-    cv2.circle(img_draw, (int(mouth["x"]), int(mouth["y"])), 5, (255, 255, 0), -1)
-
-    cv2.line(
-        img_draw,
-        (int(left_eye["x"]), int(left_eye["y"])),
-        (int(right_eye["x"]), int(right_eye["y"])),
-        (255, 255, 255),
-        2
-    )
-
-    dx = (left_eye["x"] + right_eye["x"]) / 2
-    dy = (left_eye["y"] + right_eye["y"]) / 2
-    cv2.line(
-        img_draw,
-        (int(dx), int(dy)),
-        (int(mouth["x"]), int(mouth["y"])),
-        (255, 255, 255),
-        2
-    )
-
-    major_axis = eigvecs[:, 0]
-    angle = np.degrees(np.arctan2(major_axis[1], major_axis[0]))
-
-    cv2.ellipse(
-        img_draw,
-        center=(int(center[0]), int(center[1])),
-        axes=(int(a), int(b)),
-        angle=float(angle),
-        startAngle=0,
-        endAngle=360,
-        color=(255, 0, 255),
-        thickness=2
-    )
-
-    return img_draw
-
 image_path = sys.argv[1]
-output_path = sys.argv[2]
-
 img = cv2.imread(image_path)
 threshold_e, threshold_m = 1.5, 1e10
 m, n, _ = img.shape
@@ -264,25 +341,6 @@ skin = predict(image_path, "checkpoints/unet_skin_best.pth")
 ellipse, all_points = ellipse_matching(skin)
 Eyemap = eyemap(img_rgb)
 Mouthmap = mouthmap(img_rgb,all_points)
-flat = Mouthmap.flatten()
-top_idx = np.argpartition(flat, -10)[-10:]   # 比 sort 快
-ys, xs = np.unravel_index(top_idx, Mouthmap.shape)
-
-# -------- 畫圖 --------
-plt.figure(figsize=(6, 6))
-im = plt.imshow(Mouthmap, cmap='jet')
-plt.axis('off')
-
-# 標記點（紅色）
-plt.scatter(xs, ys, c='red', s=40, marker='o', edgecolors='black')
-
-plt.colorbar(im, fraction=0.046, pad=0.04)
-plt.title("Top-10 Mouthmap Responses", y=-0.15)
-
-plt.savefig("mouthmap_result.png", dpi=200, bbox_inches='tight')
-#eye_candidates = []
-#mouth_candidates = []
-print(len(ellipse))
 for e in ellipse:
     eye_candidates = []
     mouth_candidates = []
@@ -359,10 +417,10 @@ for e in ellipse:
         continue
     valid = test_triplets_with_geometry(eye_candidates,mouth_candidates,eigvecs, mean, a, b)
 
-    if len(valid) > 0:
-        
-        best = valid[0]
-
-        img_result = draw_result(img_rgb, best, e)
-        output = cv2.cvtColor(img_result, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(output_path, output)
+    if len(valid) > 0:      
+        save_triplet_features_to_csv(
+        "triplet_dataset.csv",
+        image_path,
+        valid,
+        e
+    )

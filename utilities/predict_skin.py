@@ -38,9 +38,3 @@ def predict(image_path, weight_path):
     return mask
 
 
-if __name__ == "__main__":
-    output = predict(
-        image_path="TestImagesForPrograms/19.jpg",
-        weight_path="checkpoints/unet_skin_best.pth",
-    )
-    cv2.imwrite("19.png",output)

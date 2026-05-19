@@ -1,10 +1,4 @@
-from utilities.predict_skin import predict
-from utilities.ellipse_matching import ellipse_matching
-from utilities.ellipse_matching import draw_ellipse
-from utilities.eyemap import eyemap
-from utilities.mouthmap import mouthmap
 import cv2 
-from matplotlib import pyplot as plt
 import numpy as np
 from scipy.signal import convolve2d
 from itertools import combinations
@@ -12,8 +6,20 @@ import sys
 import joblib
 import os
 import pandas as pd
-import math
+import argparse
+
+from utilities.predict_skin import predict
+from utilities.ellipse_matching import ellipse_matching
+from utilities.eyemap import eyemap
+from utilities.mouthmap import mouthmap
+
 model = joblib.load("checkpoints/triplet_scorer_rf.pkl")
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", required=True, help="Path to input image")
+    parser.add_argument("--output", required=True, help="Path to save output image")
+    return parser.parse_args()
 
 def extract_triplet_features(e1, e2, m, ellipse_info):
     center = ellipse_info["center"]
@@ -24,28 +30,22 @@ def extract_triplet_features(e1, e2, m, ellipse_info):
     major_axis = eigvecs[:, 0]
     minor_axis = eigvecs[:, 1]
 
-    # Ellipse size (for normalization)
     ellipse_size = np.sqrt(a**2 + b**2)
 
-    # Convert absolute coordinates to relative (centered at ellipse center)
     e1_pos = np.array([e1["x"] - center[0], e1["y"] - center[1]], dtype=float)
     e2_pos = np.array([e2["x"] - center[0], e2["y"] - center[1]], dtype=float)
     m_pos = np.array([m["x"] - center[0], m["y"] - center[1]], dtype=float)
 
-    # Relative distances (normalized by ellipse size)
     e1_e2_dist = np.linalg.norm(e2_pos - e1_pos) / (ellipse_size + 1e-8)
     e1_m_dist = np.linalg.norm(m_pos - e1_pos) / (ellipse_size + 1e-8)
     e2_m_dist = np.linalg.norm(m_pos - e2_pos) / (ellipse_size + 1e-8)
 
-    # Eyes midpoint
     eyes_midpoint = (e1_pos + e2_pos) / 2
     midpoint_m_dist = np.linalg.norm(m_pos - eyes_midpoint) / (ellipse_size + 1e-8)
 
-    # Eyes to mouth vector
     eyes_mouth_vec = m_pos - eyes_midpoint
     eyes_eyes_vec = e2_pos - e1_pos
 
-    # Angles between vectors (relative geometry)
     if np.linalg.norm(eyes_eyes_vec) > 1e-8 and np.linalg.norm(eyes_mouth_vec) > 1e-8:
         cos_angle = np.dot(eyes_eyes_vec, eyes_mouth_vec) / (
             np.linalg.norm(eyes_eyes_vec) * np.linalg.norm(eyes_mouth_vec) + 1e-8
@@ -55,7 +55,6 @@ def extract_triplet_features(e1, e2, m, ellipse_info):
     else:
         angle_eyes_mouth = 0.0
 
-    # Angle between eyes-mouth vector and major axis
     if np.linalg.norm(eyes_mouth_vec) > 1e-8:
         cos_angle_major = np.dot(eyes_mouth_vec, major_axis) / (
             np.linalg.norm(eyes_mouth_vec) + 1e-8
@@ -65,12 +64,10 @@ def extract_triplet_features(e1, e2, m, ellipse_info):
     else:
         angle_to_major_axis = 0.0
 
-    # Relative positions in ellipse coordinates
     e1_x1, e1_x2 = e1["x1"], e1["x2"]
     e2_x1, e2_x2 = e2["x1"], e2["x2"]
     m_x1, m_x2 = m["x1"], m["x2"]
 
-    # Normalize by ellipse axes
     e1_x1_norm = e1_x1 / (a + 1e-8)
     e1_x2_norm = e1_x2 / (b + 1e-8)
     e2_x1_norm = e2_x1 / (a + 1e-8)
@@ -78,7 +75,6 @@ def extract_triplet_features(e1, e2, m, ellipse_info):
     m_x1_norm = m_x1 / (a + 1e-8)
     m_x2_norm = m_x2 / (b + 1e-8)
 
-    # Distance from ellipse center (normalized)
     e1_center_dist = np.sqrt(e1_x1**2 + e1_x2**2) / (ellipse_size + 1e-8)
     e2_center_dist = np.sqrt(e2_x1**2 + e2_x2**2) / (ellipse_size + 1e-8)
     m_center_dist = np.sqrt(m_x1**2 + m_x2**2) / (ellipse_size + 1e-8)
@@ -325,145 +321,153 @@ def draw_result(img_rgb, result, ellipse_info):
     )
 
     return img_draw
-output_path = sys.argv[2]
-image_path = sys.argv[1]
-image_name = os.path.splitext(os.path.basename(image_path))[0]
-img = cv2.imread(image_path)
-threshold_e, threshold_m = 1.5, 1e10
-m, n, _ = img.shape
-img_rgb = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
-skin = predict(image_path, "checkpoints/unet_skin_best.pth")
-ellipse, all_points = ellipse_matching(skin)
-Eyemap = eyemap(img_rgb)
-Mouthmap = mouthmap(img_rgb,all_points)
 
-# Track the highest scoring triplet overall
-best_triplet = None
-best_score = -1.0
-best_ellipse_info = None
+def main():
+    args = parse_args()
 
-for e in ellipse:
-    eye_candidates = []
-    mouth_candidates = []
-    a,b = e["a"],e["b"]
-    h = max(a,b)
-    w = min(a,b)
-    mean = e["center"]
-    eigvecs = e["eigvecs"]
-    kernel_c = create_circular_kernel(h)
-    kernel_e = create_ellipse_kernel(h,w)
-    eyemap_conv = convolve2d(Eyemap, kernel_c, mode='same')
-    mouthmap_conv = convolve2d(Mouthmap, kernel_e, mode='same')
+    image_path = args.input
+    output_path = args.output
 
-    for i in range(1,m-1):
-        for j in range(1,n-1):
-            val = eyemap_conv[i][j]
+    image_name = os.path.splitext(os.path.basename(image_path))[0]
+    img = cv2.imread(image_path)
+    threshold_e, threshold_m = 1.5, 1e10
+    m, n, _ = img.shape
+    img_rgb = cv2.cvtColor(img,cv2.COLOR_BGR2RGB)
+    skin = predict(image_path, "checkpoints/unet_skin_best.pth")
+    ellipse, all_points = ellipse_matching(skin)
+    Eyemap = eyemap(img_rgb)
+    Mouthmap = mouthmap(img_rgb,all_points)
 
-            if val <= threshold_e:
-                continue
+    # Track the highest scoring triplet overall
+    best_triplet = None
+    best_score = -1.0
+    best_ellipse_info = None
 
-            patch = eyemap_conv[i-1:i+2, j-1:j+2]
-            if val < np.max(patch):
-                continue
+    for e in ellipse:
+        eye_candidates = []
+        mouth_candidates = []
+        a,b = e["a"],e["b"]
+        h = max(a,b)
+        w = min(a,b)
+        mean = e["center"]
+        eigvecs = e["eigvecs"]
+        kernel_c = create_circular_kernel(h)
+        kernel_e = create_ellipse_kernel(h,w)
+        eyemap_conv = convolve2d(Eyemap, kernel_c, mode='same')
+        mouthmap_conv = convolve2d(Mouthmap, kernel_e, mode='same')
 
-            p = np.array([j, i], dtype=np.float32)
-            z = p - mean
-            xe = z @ eigvecs   # [x1, x2]
+        for i in range(1,m-1):
+            for j in range(1,n-1):
+                val = eyemap_conv[i][j]
 
-            x1, x2 = xe[0], xe[1]
+                if val <= threshold_e:
+                    continue
 
-            if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
-                continue
+                patch = eyemap_conv[i-1:i+2, j-1:j+2]
+                if val < np.max(patch):
+                    continue
 
-            eye_candidates.append({
-                "m": i,
-                "n": j,
-                "x": j,
-                "y": i,
-                "value": val,
-                "x1": x1,
-                "x2": x2
-            })
-            
-    for i in range(1,m-1):
-        for j in range(1,n-1):
-            val = mouthmap_conv[i][j]
+                p = np.array([j, i], dtype=np.float32)
+                z = p - mean
+                xe = z @ eigvecs   # [x1, x2]
 
-            if val <= threshold_m:
-                continue
+                x1, x2 = xe[0], xe[1]
 
-            patch = mouthmap_conv[i-1:i+2, j-1:j+2]
-            if val < np.max(patch):
-                continue
+                if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
+                    continue
 
-            p = np.array([j, i], dtype=np.float32)
-            z = p - mean
-            xe = z @ eigvecs   # [x1, x2]
+                eye_candidates.append({
+                    "m": i,
+                    "n": j,
+                    "x": j,
+                    "y": i,
+                    "value": val,
+                    "x1": x1,
+                    "x2": x2
+                })
+                
+        for i in range(1,m-1):
+            for j in range(1,n-1):
+                val = mouthmap_conv[i][j]
 
-            x1, x2 = xe[0], xe[1]
+                if val <= threshold_m:
+                    continue
 
-            if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
-                continue
+                patch = mouthmap_conv[i-1:i+2, j-1:j+2]
+                if val < np.max(patch):
+                    continue
 
-            mouth_candidates.append({
-                "m": i,
-                "n": j,
-                "x": j,
-                "y": i,
-                "value": val,
-                "x1": x1,
-                "x2": x2
-            }) 
-    if len(eye_candidates)<2 or len(mouth_candidates)<1:
-        continue
+                p = np.array([j, i], dtype=np.float32)
+                z = p - mean
+                xe = z @ eigvecs   # [x1, x2]
 
-    # First use test_triplets_with_geometry to extract valid triplets
-    valid = test_triplets_with_geometry(
-        eye_candidates,
-        mouth_candidates,
-        e["eigvecs"],
-        e["center"],
-        e["a"],
-        e["b"]
-    )
-    
-    # Then use random forest model to predict the score of each triplet
-    if len(valid) > 0:
-        features_list = []
-        for triplet in valid:
-            features = extract_triplet_features(
-                triplet["left_eye"],
-                triplet["right_eye"],
-                triplet["mouth"],
-                e
-            )
-            features_list.append(features)
-        
-        X = pd.DataFrame(features_list, columns=FEATURE_NAMES)
-        scores = model.predict_proba(X)[:, 1]
-        
-        # Update scores with model predictions
-        for triplet, score in zip(valid, scores):
-            triplet["score"] = float(score)
-        
-        # Sort by model score
-        valid = sorted(
-            valid,
-            key=lambda x: x["score"],
-            reverse=True
+                x1, x2 = xe[0], xe[1]
+
+                if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
+                    continue
+
+                mouth_candidates.append({
+                    "m": i,
+                    "n": j,
+                    "x": j,
+                    "y": i,
+                    "value": val,
+                    "x1": x1,
+                    "x2": x2
+                }) 
+        if len(eye_candidates)<2 or len(mouth_candidates)<1:
+            continue
+
+        # First use test_triplets_with_geometry to extract valid triplets
+        valid = test_triplets_with_geometry(
+            eye_candidates,
+            mouth_candidates,
+            e["eigvecs"],
+            e["center"],
+            e["a"],
+            e["b"]
         )
         
-        # Track the best triplet overall
-        if valid[0]["score"] > best_score:
-            best_score = valid[0]["score"]
-            best_triplet = valid[0]
-            best_ellipse_info = e
+        # Then use random forest model to predict the score of each triplet
+        if len(valid) > 0:
+            features_list = []
+            for triplet in valid:
+                features = extract_triplet_features(
+                    triplet["left_eye"],
+                    triplet["right_eye"],
+                    triplet["mouth"],
+                    e
+                )
+                features_list.append(features)
+            
+            X = pd.DataFrame(features_list, columns=FEATURE_NAMES)
+            scores = model.predict_proba(X)[:, 1]
+            
+            # Update scores with model predictions
+            for triplet, score in zip(valid, scores):
+                triplet["score"] = float(score)
+            
+            # Sort by model score
+            valid = sorted(
+                valid,
+                key=lambda x: x["score"],
+                reverse=True
+            )
+            
+            # Track the best triplet overall
+            if valid[0]["score"] > best_score:
+                best_score = valid[0]["score"]
+                best_triplet = valid[0]
+                best_ellipse_info = e
 
-# Save the highest scoring triplet image
-if best_triplet is not None:
-    img_best = draw_result(img_rgb, best_triplet, best_ellipse_info)  
-    # Convert to BGR for cv2.imwrite
-    img_best_bgr = cv2.cvtColor(img_best, cv2.COLOR_RGB2BGR)
-    cv2.imwrite(output_path, img_best_bgr)
-else:
-    print("No valid triplets found in the image.")
+    # Save the highest scoring triplet image
+    if best_triplet is not None:
+        img_best = draw_result(img_rgb, best_triplet, best_ellipse_info)  
+        # Convert to BGR for cv2.imwrite
+        img_best_bgr = cv2.cvtColor(img_best, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(output_path, img_best_bgr)
+    else:
+        print("No valid triplets found in the image.")
+
+if __name__ == "__main__":
+    main()

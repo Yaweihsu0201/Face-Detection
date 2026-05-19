@@ -8,9 +8,9 @@ do
 
     out="FaceDetectionResults/${filename}.png"
 
-    python FaceDetection.py "$img" "$out"
+    python FaceDetection.py --input "$img" --output "$out"
 
     echo "Finished processing $img"
 done
 
-echo "All images finished."
+echo "All images finished." 

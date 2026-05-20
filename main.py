@@ -12,6 +12,7 @@ from utilities.predict_skin import predict
 from utilities.ellipse_matching import ellipse_matching
 from utilities.eyemap import eyemap
 from utilities.mouthmap import mouthmap
+from utilities.triplet_finder import find_best_triplet_over_ellipses
 
 model = joblib.load("checkpoints/triplet_scorer_rf.pkl")
 
@@ -21,167 +22,6 @@ def parse_args():
     parser.add_argument("--output", required=True, help="Path to save output image")
     return parser.parse_args()
 
-def extract_triplet_features(e1, e2, m, ellipse_info):
-    center = ellipse_info["center"]
-    a = ellipse_info["a"]
-    b = ellipse_info["b"]
-    eigvecs = ellipse_info["eigvecs"]
-
-    major_axis = eigvecs[:, 0]
-    minor_axis = eigvecs[:, 1]
-
-    ellipse_size = np.sqrt(a**2 + b**2)
-
-    e1_pos = np.array([e1["x"] - center[0], e1["y"] - center[1]], dtype=float)
-    e2_pos = np.array([e2["x"] - center[0], e2["y"] - center[1]], dtype=float)
-    m_pos = np.array([m["x"] - center[0], m["y"] - center[1]], dtype=float)
-
-    e1_e2_dist = np.linalg.norm(e2_pos - e1_pos) / (ellipse_size + 1e-8)
-    e1_m_dist = np.linalg.norm(m_pos - e1_pos) / (ellipse_size + 1e-8)
-    e2_m_dist = np.linalg.norm(m_pos - e2_pos) / (ellipse_size + 1e-8)
-
-    eyes_midpoint = (e1_pos + e2_pos) / 2
-    midpoint_m_dist = np.linalg.norm(m_pos - eyes_midpoint) / (ellipse_size + 1e-8)
-
-    eyes_mouth_vec = m_pos - eyes_midpoint
-    eyes_eyes_vec = e2_pos - e1_pos
-
-    if np.linalg.norm(eyes_eyes_vec) > 1e-8 and np.linalg.norm(eyes_mouth_vec) > 1e-8:
-        cos_angle = np.dot(eyes_eyes_vec, eyes_mouth_vec) / (
-            np.linalg.norm(eyes_eyes_vec) * np.linalg.norm(eyes_mouth_vec) + 1e-8
-        )
-        cos_angle = np.clip(cos_angle, -1.0, 1.0)
-        angle_eyes_mouth = np.degrees(np.arccos(abs(cos_angle)))
-    else:
-        angle_eyes_mouth = 0.0
-
-    if np.linalg.norm(eyes_mouth_vec) > 1e-8:
-        cos_angle_major = np.dot(eyes_mouth_vec, major_axis) / (
-            np.linalg.norm(eyes_mouth_vec) + 1e-8
-        )
-        cos_angle_major = np.clip(cos_angle_major, -1.0, 1.0)
-        angle_to_major_axis = np.degrees(np.arccos(abs(cos_angle_major)))
-    else:
-        angle_to_major_axis = 0.0
-
-    e1_x1, e1_x2 = e1["x1"], e1["x2"]
-    e2_x1, e2_x2 = e2["x1"], e2["x2"]
-    m_x1, m_x2 = m["x1"], m["x2"]
-
-    e1_x1_norm = e1_x1 / (a + 1e-8)
-    e1_x2_norm = e1_x2 / (b + 1e-8)
-    e2_x1_norm = e2_x1 / (a + 1e-8)
-    e2_x2_norm = e2_x2 / (b + 1e-8)
-    m_x1_norm = m_x1 / (a + 1e-8)
-    m_x2_norm = m_x2 / (b + 1e-8)
-
-    e1_center_dist = np.sqrt(e1_x1**2 + e1_x2**2) / (ellipse_size + 1e-8)
-    e2_center_dist = np.sqrt(e2_x1**2 + e2_x2**2) / (ellipse_size + 1e-8)
-    m_center_dist = np.sqrt(m_x1**2 + m_x2**2) / (ellipse_size + 1e-8)
-
-    features = [
-        # Relative distances (normalized by ellipse size)
-        e1_e2_dist,
-        e1_m_dist,
-        e2_m_dist,
-        midpoint_m_dist,
-
-        # Ellipse-normalized coordinates (relative to ellipse)
-        e1_x1_norm,
-        e1_x2_norm,
-        e2_x1_norm,
-        e2_x2_norm,
-        m_x1_norm,
-        m_x2_norm,
-
-        # Distance from center (normalized)
-        e1_center_dist,
-        e2_center_dist,
-        m_center_dist,
-
-        # Angles (relative geometry)
-        angle_eyes_mouth,
-        angle_to_major_axis,
-
-        # Ellipse shape (relative)
-        a / (b + 1e-8),
-
-        # Ellipse orientation
-        major_axis[0],
-        major_axis[1],
-        minor_axis[0],
-        minor_axis[1],
-
-        # Map response values
-        e1["value"],
-        e2["value"],
-        m["value"],
-    ]
-
-    return features
-
-FEATURE_NAMES = [
-    # Relative distances (normalized by ellipse size)
-    "e1_e2_dist_norm",
-    "e1_m_dist_norm",
-    "e2_m_dist_norm",
-    "midpoint_m_dist_norm",
-
-    # Ellipse-normalized coordinates (relative to ellipse)
-    "left_eye_x1_norm",
-    "left_eye_x2_norm",
-    "right_eye_x1_norm",
-    "right_eye_x2_norm",
-    "mouth_x1_norm",
-    "mouth_x2_norm",
-
-    # Distance from ellipse center (normalized)
-    "left_eye_center_dist_norm",
-    "right_eye_center_dist_norm",
-    "mouth_center_dist_norm",
-
-    # Angles (relative geometry)
-    "angle_eyes_mouth",
-    "angle_to_major_axis",
-
-    # Ellipse shape (relative)
-    "ellipse_ab_ratio",
-
-    # Ellipse orientation
-    "major_axis_x",
-    "major_axis_y",
-    "minor_axis_x",
-    "minor_axis_y",
-
-    # Map response values
-    "left_eye_value",
-    "right_eye_value",
-    "mouth_value",
-]
-
-def create_circular_kernel(h):
-    r = int(h / 40)
-    y, x = np.ogrid[-r:r+1, -r:r+1]
-
-    mask = x*x + y*y <= r*r
-
-    kernel = np.zeros((2*r+1, 2*r+1), dtype=np.float32)
-    kernel[mask] = (40 / h)**2
-
-    return kernel
-
-def create_ellipse_kernel(h, w):
-    a = h / 25   # vertical radius
-    b = w / 4    # horizontal radius
-
-    hh = int(np.ceil(a))
-    ww = int(np.ceil(b))
-
-    y, x = np.ogrid[-hh:hh+1, -ww:ww+1]
-
-    kernel = ((y / a)**2 + (x / b)**2 <= 1).astype(np.float32)
-
-    return kernel
 
 def test_triplets_with_geometry(
     eye_candidates,
@@ -328,7 +168,6 @@ def main():
     image_path = args.input
     output_path = args.output
 
-    image_name = os.path.splitext(os.path.basename(image_path))[0]
     img = cv2.imread(image_path)
     threshold_e, threshold_m = 1.5, 1e10
     m, n, _ = img.shape
@@ -338,128 +177,21 @@ def main():
     Eyemap = eyemap(img_rgb)
     Mouthmap = mouthmap(img_rgb,all_points)
 
-    # Track the highest scoring triplet overall
-    best_triplet = None
-    best_score = -1.0
-    best_ellipse_info = None
+    best_result = find_best_triplet_over_ellipses(
+        ellipses=ellipse,
+        eye_map=Eyemap,
+        mouth_map=Mouthmap,
+        image_shape=img_rgb.shape,
+        model=model,
+        geometry_func=test_triplets_with_geometry,
+        threshold_e=threshold_e,
+        threshold_m=threshold_m
+    )
 
-    for e in ellipse:
-        eye_candidates = []
-        mouth_candidates = []
-        a,b = e["a"],e["b"]
-        h = max(a,b)
-        w = min(a,b)
-        mean = e["center"]
-        eigvecs = e["eigvecs"]
-        kernel_c = create_circular_kernel(h)
-        kernel_e = create_ellipse_kernel(h,w)
-        eyemap_conv = convolve2d(Eyemap, kernel_c, mode='same')
-        mouthmap_conv = convolve2d(Mouthmap, kernel_e, mode='same')
-
-        for i in range(1,m-1):
-            for j in range(1,n-1):
-                val = eyemap_conv[i][j]
-
-                if val <= threshold_e:
-                    continue
-
-                patch = eyemap_conv[i-1:i+2, j-1:j+2]
-                if val < np.max(patch):
-                    continue
-
-                p = np.array([j, i], dtype=np.float32)
-                z = p - mean
-                xe = z @ eigvecs   # [x1, x2]
-
-                x1, x2 = xe[0], xe[1]
-
-                if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
-                    continue
-
-                eye_candidates.append({
-                    "m": i,
-                    "n": j,
-                    "x": j,
-                    "y": i,
-                    "value": val,
-                    "x1": x1,
-                    "x2": x2
-                })
-                
-        for i in range(1,m-1):
-            for j in range(1,n-1):
-                val = mouthmap_conv[i][j]
-
-                if val <= threshold_m:
-                    continue
-
-                patch = mouthmap_conv[i-1:i+2, j-1:j+2]
-                if val < np.max(patch):
-                    continue
-
-                p = np.array([j, i], dtype=np.float32)
-                z = p - mean
-                xe = z @ eigvecs   # [x1, x2]
-
-                x1, x2 = xe[0], xe[1]
-
-                if (x1**2) / (a**2) + (x2**2) / (b**2) > 0.8:
-                    continue
-
-                mouth_candidates.append({
-                    "m": i,
-                    "n": j,
-                    "x": j,
-                    "y": i,
-                    "value": val,
-                    "x1": x1,
-                    "x2": x2
-                }) 
-        if len(eye_candidates)<2 or len(mouth_candidates)<1:
-            continue
-
-        # First use test_triplets_with_geometry to extract valid triplets
-        valid = test_triplets_with_geometry(
-            eye_candidates,
-            mouth_candidates,
-            e["eigvecs"],
-            e["center"],
-            e["a"],
-            e["b"]
-        )
-        
-        # Then use random forest model to predict the score of each triplet
-        if len(valid) > 0:
-            features_list = []
-            for triplet in valid:
-                features = extract_triplet_features(
-                    triplet["left_eye"],
-                    triplet["right_eye"],
-                    triplet["mouth"],
-                    e
-                )
-                features_list.append(features)
-            
-            X = pd.DataFrame(features_list, columns=FEATURE_NAMES)
-            scores = model.predict_proba(X)[:, 1]
-            
-            # Update scores with model predictions
-            for triplet, score in zip(valid, scores):
-                triplet["score"] = float(score)
-            
-            # Sort by model score
-            valid = sorted(
-                valid,
-                key=lambda x: x["score"],
-                reverse=True
-            )
-            
-            # Track the best triplet overall
-            if valid[0]["score"] > best_score:
-                best_score = valid[0]["score"]
-                best_triplet = valid[0]
-                best_ellipse_info = e
-
+    best_triplet = best_result["best_triplet"]
+    best_score = best_result["best_score"]
+    best_ellipse_info = best_result["best_ellipse_info"]
+    print("modified!")
     # Save the highest scoring triplet image
     if best_triplet is not None:
         img_best = draw_result(img_rgb, best_triplet, best_ellipse_info)  

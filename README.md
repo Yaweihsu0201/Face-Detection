@@ -180,29 +180,6 @@ After geometric filtering, each valid triplet is converted into a feature vector
 
 A trained Random Forest classifier predicts the confidence score of each triplet. The best-scoring triplet is selected as the final result.
 
-## Refactoring Notes
-
-The project was refactored from a single script into modular components:
-
-```text
-detector.py
-    Main FaceDetector class and detection pipeline
-
-utilities/triplet_finder.py
-    Searches all ellipses and finds the best triplet
-
-utilities/triplet_scorer.py
-    Extracts triplet features and scores them with a Random Forest model
-
-utilities/triplet_geometry.py
-    Applies facial geometry constraints
-
-utilities/visualization.py
-    Draws the final detection result
-```
-
-This modular structure makes the project easier to maintain, test, and extend.
-
 ## Future Improvements
 
 Possible future improvements include:
@@ -214,7 +191,3 @@ Possible future improvements include:
 - Train a stronger triplet scoring model
 - Compare performance with modern face detectors such as MTCNN, RetinaFace, or YOLO-based detectors
 - Add support for multiple face detection in one image
-
-## Acknowledgements
-
-This project is based on classical image processing concepts, skin segmentation, facial feature maps, geometric reasoning, and machine learning-based scoring.

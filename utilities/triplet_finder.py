@@ -4,6 +4,7 @@ import numpy as np
 from scipy.signal import convolve2d
 
 from utilities.triplet_scorer import score_triplets
+from utilities.triplet_geometry import test_triplets_with_geometry
 
 
 def create_circular_kernel(h):
@@ -125,7 +126,6 @@ def find_best_triplet_over_ellipses(
     mouth_map,
     image_shape,
     model,
-    geometry_func,
     threshold_e=1.5,
     threshold_m=1e10
 ):
@@ -161,7 +161,7 @@ def find_best_triplet_over_ellipses(
         if len(eye_candidates) < 2 or len(mouth_candidates) < 1:
             continue
 
-        valid_triplets = geometry_func(
+        valid_triplets = test_triplets_with_geometry(
             eye_candidates,
             mouth_candidates,
             ellipse_info["eigvecs"],
